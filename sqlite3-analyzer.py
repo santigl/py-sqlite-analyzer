@@ -308,9 +308,8 @@ class SQLite3ClassicReport:
 
         return p.format(percentage)
 
-    def _print_definition(self):
-        d = '''*** Definitions ***************************************************************
-Page size in bytes
+    def print_definitions(self):
+        d = '''Page size in bytes
 
     The number of bytes in a single page of the database file.
     Usually 1024.
@@ -470,7 +469,9 @@ Unused bytes on all pages
     pages.  The percentage at the right is the number of unused bytes
     divided by the total number of bytes.
 '''.format(self._stats.page_size())
+        self._title_line('Definitions')
         print(d)
+        print('*' * 79)
 
 
 def main():
@@ -488,9 +489,8 @@ def main():
     a.global_usage_report()
     a.indices_usage_report()
     a.tables_details_report()
-
+    a.print_definitions()
     a.stat_db_dump()
-
 
 
 if __name__ == "__main__":
