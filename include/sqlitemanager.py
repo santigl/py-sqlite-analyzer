@@ -44,30 +44,30 @@ class SQLite3Manager():
 
         self._db_connection.row_factory = sqlite3.Row
 
-    def executeQuery(self, *args):
+    def execute_query(self, *args):
         self._db_connection.cursor().execute(*args)
         self._db_connection.commit()
 
-    def fetchSingleField(self, query):
-        cursor = self._createCursor()
+    def fetch_single_field(self, query):
+        cursor = self._create_cursor()
         return tuple(cursor.execute(query).fetchone())[0]
 
-    def fetchOneRow(self, query):
-        cursor = self._createCursor()
+    def fetch_one_row(self, query):
+        cursor = self._create_cursor()
         return cursor.execute(query).fetchone()
 
-    def fetchAllRows(self, query):
-        cursor = self._createCursor()
+    def fetch_all_rows(self, query):
+        cursor = self._create_cursor()
         return cursor.execute(query).fetchall()
 
     def iterdump(self):
         return self._db_connection.iterdump()
 
-    def _createCursor(self):
+    def _create_cursor(self):
         return self._db_connection.cursor()
 
     def _have_required_compile_flags(self):
         has_flag = '''SELECT 1 FROM pragma_compile_options
                       WHERE compile_options="ENABLE_DBSTAT_VTAB"'''
 
-        return bool(self.fetchSingleField(has_flag))
+        return bool(self.fetch_single_field(has_flag))
