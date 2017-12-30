@@ -255,17 +255,17 @@ class SQLite3Analyzer:
     def nindex(self) -> int:
         """Returns the number of indices in the database."""
         return self._db.fetch_single_field('''SELECT count(*)
-                                            FROM sqlite_master
-                                            WHERE type="index"
-                                         ''')
+                                              FROM sqlite_master
+                                              WHERE type="index"
+                                           ''')
 
     def nautoindex(self) -> int:
         """Number of automatically-created indices in the database."""
         return self._db.fetch_single_field('''SELECT count(*)
-                                            FROM sqlite_master
-                                            WHERE name
-                                            LIKE "sqlite_autoindex%"
-                                        ''')
+                                              FROM sqlite_master
+                                              WHERE name
+                                              LIKE "sqlite_autoindex%"
+                                           ''')
     def nmanindex(self)-> int:
         """Number of manually-created indices in the database."""
         return self.nindex() - self.nautoindex()
@@ -348,28 +348,30 @@ class SQLite3Analyzer:
 
     def index_page_count(self, name: str) -> int:
         """Number of pages that the index is currently using.
+
         Args:
             name: name of the index
 
         Returns:
             number of pages
+
         """
         return self._query_page_count(name)
 
-    def index_stats(self, name: str) -> dict:
+    def index_stats(self, name: str) -> StorageMetrics:
         """Returns statistics for the index.
 
         Args:
             name: name of the index
 
         Returns:
-            A dict with the following information:
-            dict...
+            a StorageMetrics object
+
         """
         condition = 'name = "{}"'.format(name)
         return self._query_space_used_table(condition)
 
-    def table_stats(self, name: str, exclude_indices=False):
+    def table_stats(self, name: str, exclude_indices=False) -> StorageMetrics:
         """Returns statistics for a table.
 
         The value of the optional parameter ``exclude_indices``,
@@ -380,8 +382,7 @@ class SQLite3Analyzer:
             name: name of the table
 
         Returns:
-            A dict with the following information:
-            dict...
+            a StorageMetrics object
 
 
         """
@@ -392,7 +393,7 @@ class SQLite3Analyzer:
 
         return self._query_space_used_table(condition)
 
-    def global_stats(self, exclude_indices=False):
+    def global_stats(self, exclude_indices=False) -> StorageMetrics:
         """Stats for all tables and/or indices in the database
 
         The value of the optional parameter ``exclude_indices``
@@ -402,7 +403,7 @@ class SQLite3Analyzer:
         condition = 'NOT is_index' if exclude_indices else '1'
         return self._query_space_used_table(condition)
 
-    def indices_stats(self):
+    def indices_stats(self) -> StorageMetrics:
         """Return metadata about the indices in the database.
 
         Raises:
@@ -422,6 +423,7 @@ class SQLite3Analyzer:
 
         References:
             https://sqlite.org/withoutrowid.html
+
         """
         query = 'PRAGMA index_list = "{}"'.format(table)
         indices = self._db.fetch_all_rows(query)
@@ -443,6 +445,7 @@ class SQLite3Analyzer:
 
         Returns:
             list of lines containing an SQL dump of the stat database.
+
         """
         return list(self._stat_db.iterdump())
 
@@ -617,10 +620,10 @@ class SQLite3Analyzer:
 # overflow chains present are traversed from start to finish before any
 # child-tree is.
         pages = self._db.fetch_all_rows('''SELECT pageno, pagetype
-                                         FROM temp.dbstat
-                                         WHERE name="{}"
-                                         ORDER BY pageno;
-                                      '''.format(table_name))
+                                           FROM temp.dbstat
+                                           WHERE name="{}"
+                                           ORDER BY pageno;
+                                        '''.format(table_name))
         gap_count = 0
         previous_page = 0
         for page in pages:
@@ -645,7 +648,7 @@ class SQLite3Analyzer:
 
         return tables + [sqlite_master_table]
 
-    def _extract_sqlite_stats(self, table_name: str) -> StorageMetrics:
+    def _extract_sqlite_stats(self, table_name: str) -> dict:
         query = '''SELECT
                 sum(ncell) AS nentry,
                 sum((pagetype == 'leaf') * ncell) AS leaf_entries,
@@ -666,7 +669,7 @@ class SQLite3Analyzer:
                 WHERE name = '{}';'''.format(table_name)
 
 
-        stats = self._extract_storage_metrics(self._db.fetch_all_rows(query)[0])
+        stats = self._row_to_dict(self._db.fetch_one_row(query))
         stats['is_without_rowid'] = self.is_without_rowid(table_name)
         stats['gap_count'] = self._count_gaps(table_name)
 
