@@ -25,8 +25,8 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import sqlite3
-import os
+from math import ceil
+from os import stat
 from include.sqlitemanager import SQLite3Manager
 
 class SQLite3Analyzer:
@@ -44,14 +44,14 @@ class SQLite3Analyzer:
         self._stat_db.execute_query(self._spaceused_table_create_query())
 
         # Gathering the stats for all tables:
-        self._computeStats()
+        self._compute_stats()
 
     def item_count(self):
         return self._db.fetch_single_field('''SELECT COUNT(*)
                                             from SQLITE_MASTER''')
 
     def file_size(self):
-        return os.stat(self._db_file).st_size
+        return stat(self._db_file).st_size
 
     # file_bytes
     def logical_file_size(self):
@@ -112,8 +112,8 @@ class SQLite3Analyzer:
         return [t for t in tables if t['name'] != t['tbl_name']]
 
     def index_list(self, table):
-      query = 'PRAGMA index_list = "{}"'.format(table)
-      return [self._row_to_dict(row)\
+        query = 'PRAGMA index_list = "{}"'.format(table)
+        return [self._row_to_dict(row)\
               for row in self._stat_db.fetch_all_rows(query)]
 
     def ntable(self):
@@ -141,11 +141,11 @@ class SQLite3Analyzer:
 
     def payload_size(self):
         return self._stat_db.fetch_single_field('''SELECT sum(payload)
-                                                 FROM space_used
-                                                 WHERE NOT is_index
-                                                 AND name NOT
-                                                  LIKE "sqlite_master";
-                                             ''')
+                                                   FROM space_used
+                                                   WHERE NOT is_index
+                                                   AND name NOT
+                                                   LIKE "sqlite_master";
+                                                ''')
 
     def is_compressed(self):
         if self._is_compressed is None:
@@ -167,7 +167,7 @@ class SQLite3Analyzer:
         #
         # The first pointer-map page is the second page
         # of the file overall.
-        page_size = double(self.page_size())
+        page_size = float(self.page_size())
         pointers_per_page = page_size / 5
 
         # Return the number of pointer map pages
@@ -175,210 +175,205 @@ class SQLite3Analyzer:
         return ceil((self.page_count() - 1) / (pointers_per_page + 1))
 
     def table_space_usage(self, table=None):
-      if table is not None:
-        return self._table_space_usage(table)
+        if table is not None:
+            return self._table_space_usage(table)
 
-      return self._all_tables_usage()
+        return self._all_tables_usage()
 
     def table_page_count(self, name, exclude_indices=False):
-      if exclude_indices:
-        return self.table_stats(name, exclude_indices)['total_pages']
+        if exclude_indices:
+            return self.table_stats(name,
+                                    exclude_indices)['total_pages']
 
-      return self._query_page_count(name)
+        return self._query_page_count(name)
 
     def index_page_count(self, name):
-      return self._query_page_count(name)
+        return self._query_page_count(name)
 
     def index_stats(self, name):
-      condition = 'name = "{}"'.format(name)
-      return self._query_space_used_table(condition)
+        condition = 'name = "{}"'.format(name)
+        return self._query_space_used_table(condition)
 
     def table_stats(self, name, exclude_indices=False):
-      if exclude_indices:
-        condition = 'name = "{}"'.format(name)
-      else:
-        condition = 'tblname = "{}"'.format(name)
+        if exclude_indices:
+            condition = 'name = "{}"'.format(name)
+        else:
+            condition = 'tblname = "{}"'.format(name)
 
-      return self._query_space_used_table(condition)
+        return self._query_space_used_table(condition)
 
     def global_stats(self, exclude_indices=False):
-      condition = 'NOT is_index' if exclude_indices else '1'
-      return self._query_space_used_table(condition)
+        condition = 'NOT is_index' if exclude_indices else '1'
+        return self._query_space_used_table(condition)
 
     def indices_stats(self):
       #
       # THROW EXCEPTION IF THERE ARE NO INDICES (!)
       #
 
-      return self._query_space_used_table('is_index')
+        return self._query_space_used_table('is_index')
 
     def is_without_rowid(self, table):
-      query = 'PRAGMA index_list = "{}"'.format(table)
-      indices = self._db.fetch_all_rows(query)
+        query = 'PRAGMA index_list = "{}"'.format(table)
+        indices = self._db.fetch_all_rows(query)
 
-      for index in indices:
-        if index['origin'].upper() == "PK":
-          pk_is_table = self._db.fetch_single_field('''SELECT count(*)
-                                                     FROM sqlite_master
-                                                     WHERE name="{}"
-                                                     '''.format(table))
-          if not pk_is_table:
-            return True
+        for index in indices:
+            if index['origin'].upper() == "PK":
+                query = '''SELECT count(*)
+                           FROM sqlite_master
+                           WHERE name="{}"'''.format(table)
 
-      return False
+                pk_is_table = self._db.fetch_single_field(query)
+            if not pk_is_table:
+                return True
+
+        return False
 
     def stat_db_dump(self):
-      print('The entire text of this report can be sourced into any '
-            'SQL database')
-      print('engine for further analysis. '
-            'All of the text above is an SQL comment.')
-      print('The data used to generate this report follows:')
-      print('*/')
+        print('The entire text of this report can be sourced into any '
+              'SQL database')
+        print('engine for further analysis. '
+              'All of the text above is an SQL comment.')
+        print('The data used to generate this report follows:')
+        print('*/')
 
-      return list(self._stat_db.iterdump())
+        return list(self._stat_db.iterdump())
 
 
 
 #### HELPERS ####
 
     def _query_space_used_table(self, where):
-      # total_pages: Database pages consumed.
-      # total_pages_percent: Pages consumed as a percentage of the file.
-      # storage: Bytes consumed.
-      # payload_percent: Payload bytes used as a percentage of $storage.
-      # total_unused: Unused bytes on pages.
-      # avg_payload: Average payload per btree entry.
-      # avg_fanout: Average fanout for internal pages.
-      # avg_unused: Average unused bytes per btree entry.
-      # avg_meta: Average metadata overhead per entry.
-      # ovfl_cnt_percent: Percentage of btree entries that use overflow pages.
-      query = '''SELECT
-                  sum(
+        # total_pages: Database pages consumed.
+        # total_pages_percent: Pages consumed as a percentage of the file.
+        # storage: Bytes consumed.
+        # payload_percent: Payload bytes used as a percentage of $storage.
+        # total_unused: Unused bytes on pages.
+        # avg_payload: Average payload per btree entry.
+        # avg_fanout: Average fanout for internal pages.
+        # avg_unused: Average unused bytes per btree entry.
+        # avg_meta: Average metadata overhead per entry.
+        # ovfl_cnt_percent: Percentage of btree entries that use overflow pages.
+        query = '''SELECT
+                   sum(
                     CASE WHEN (is_without_rowid OR is_index) THEN nentry
                          ELSE leaf_entries
                     END
-                  ) AS nentry,
-                  sum(payload) AS payload,
-                  sum(ovfl_payload) AS ovfl_payload,
-                  max(mx_payload) AS mx_payload,
-                  sum(ovfl_cnt) as ovfl_cnt,
-                  sum(leaf_pages) AS leaf_pages,
-                  sum(int_pages) AS int_pages,
-                  sum(ovfl_pages) AS ovfl_pages,
-                  sum(leaf_unused) AS leaf_unused,
-                  sum(int_unused) AS int_unused,
-                  sum(ovfl_unused) AS ovfl_unused,
-                  sum(gap_cnt) AS gap_cnt,
-                  sum(compressed_size) AS compressed_size,
-                  max(depth) AS depth,
-                  count(*) AS cnt
-                  FROM space_used
-                  WHERE {}
-              '''.format(where)
+                   ) AS nentry,
+                   sum(payload) AS payload,
+                   sum(ovfl_payload) AS ovfl_payload,
+                   max(mx_payload) AS mx_payload,
+                   sum(ovfl_cnt) as ovfl_cnt,
+                   sum(leaf_pages) AS leaf_pages,
+                   sum(int_pages) AS int_pages,
+                   sum(ovfl_pages) AS ovfl_pages,
+                   sum(leaf_unused) AS leaf_unused,
+                   sum(int_unused) AS int_unused,
+                   sum(ovfl_unused) AS ovfl_unused,
+                   sum(gap_cnt) AS gap_cnt,
+                   sum(compressed_size) AS compressed_size,
+                   max(depth) AS depth,
+                   count(*) AS cnt
+                   FROM space_used
+                   WHERE {}
+                '''.format(where)
 
-      stats = self._stat_db.fetch_one_row(query)
-      s = self._row_to_dict(stats)
+        stats = self._stat_db.fetch_one_row(query)
+        s = self._row_to_dict(stats)
 
-      # Adding calculated values:
-      s['total_pages'] = s['leaf_pages']\
-                         + s['int_pages']\
-                         + s['ovfl_pages']
+        # Adding calculated values:
+        s['total_pages'] = s['leaf_pages']\
+                           + s['int_pages']\
+                           + s['ovfl_pages']
 
-      s['total_pages_percent'] = self._percentage(s['total_pages'],
-                                                  self.page_count())
+        s['total_pages_percent'] = self._percentage(s['total_pages'],
+                                                    self.page_count())
 
-      s['storage'] = s['total_pages'] * self.page_size()
+        s['storage'] = s['total_pages'] * self.page_size()
 
-      s['is_compressed'] = (s['storage'] > s['compressed_size'])
+        s['is_compressed'] = (s['storage'] > s['compressed_size'])
 
-      s['compressed_overhead'] = 14 if s['is_compressed'] \
-                                 else 0
+        s['compressed_overhead'] = 14 if s['is_compressed'] \
+                                   else 0
 
-      s['payload_percent'] = self._percentage(s['payload'], s['storage'])
+        s['payload_percent'] = self._percentage(s['payload'],
+                                                s['storage'])
 
-      s['total_unused'] = s['ovfl_unused']\
+        s['total_unused'] = s['ovfl_unused']\
                           + s['int_unused'] \
                           + s['leaf_unused']
 
-      s['total_metadata'] = s['storage'] - s['payload']\
+        s['total_metadata'] = s['storage'] - s['payload']\
                             - s['total_unused']\
                             + 4 * (s['ovfl_pages'] - s['ovfl_cnt'])
 
-      s['metadata_percent'] = self._percentage(s['total_metadata'],
-                                               s['storage'])
+        s['metadata_percent'] = self._percentage(s['total_metadata'],
+                                                 s['storage'])
 
-      if s['nentry'] == 0:
-        s['average_payload'] = 0
-        s['average_unused']  = s['average_metadata'] = 0
-      else:
-        s['average_payload'] = s['payload'] / s['nentry']
-        s['average_unused'] = s['total_unused'] / s['nentry']
-        s['average_metadata'] = s['total_metadata'] / s['nentry']
+        if s['nentry'] == 0:
+            s['average_payload'] = 0
+            s['average_unused'] = s['average_metadata'] = 0
+        else:
+            s['average_payload'] = s['payload'] / s['nentry']
+            s['average_unused'] = s['total_unused'] / s['nentry']
+            s['average_metadata'] = s['total_metadata'] / s['nentry']
 
 
-      s['ovfl_percent'] = self._percentage(s['ovfl_cnt'], s['nentry'])
+        s['ovfl_percent'] = self._percentage(s['ovfl_cnt'], s['nentry'])
 
-      s['fragmentation'] = self._percentage(s['gap_cnt'],
-                                            s['total_pages'] - 1)
+        s['fragmentation'] = self._percentage(s['gap_cnt'],
+                                              s['total_pages'] - 1)
 
-      s['int_unused_percent'] = self._percentage(s['int_unused'],
-                                                 s['int_pages']\
-                                                 * self.page_size())
+        s['int_unused_percent'] = self._percentage(s['int_unused'],
+                                                   s['int_pages']\
+                                                   * self.page_size())
 
-      s['ovfl_unused_percent'] = self._percentage(s['ovfl_unused'],
-                                                  s['ovfl_pages']\
-                                                  * self.page_size())
+        s['ovfl_unused_percent'] = self._percentage(s['ovfl_unused'],
+                                                    s['ovfl_pages']\
+                                                    * self.page_size())
 
-      s['leaf_unused_percent'] = self._percentage(s['leaf_unused'],
-                                                  s['leaf_pages']\
-                                                  * self.page_size())
+        s['leaf_unused_percent'] = self._percentage(s['leaf_unused'],
+                                                    s['leaf_pages']\
+                                                    * self.page_size())
 
-      s['total_unused_percent'] = self._percentage(s['total_unused'],
-                                                   s['storage'])
+        s['total_unused_percent'] = self._percentage(s['total_unused'],
+                                                     s['storage'])
 
-      return s
+        return s
 
 
     def _query_page_count(self, name):
-      query = '''SELECT (int_pages + leaf_pages + ovfl_pages) AS count
+        query = '''SELECT (int_pages + leaf_pages + ovfl_pages) AS count
                  FROM space_used
                  WHERE name = '{}'
                  '''.format(name)
-      return self._stat_db.fetch_single_field(query)
+        return self._stat_db.fetch_single_field(query)
 
     def _all_tables_usage(self):
-      ''' Returns the usage of all tables.
-      '''
-      query = '''SELECT tblname as name,
+        ''' Returns the usage of all tables.
+        '''
+        query = '''SELECT tblname as name,
                         count(*) AS count,
                         sum(int_pages + leaf_pages + ovfl_pages) AS size
                   FROM space_used
                   GROUP BY tblname
                   ORDER BY size+0 DESC, tblname'''
-      return [self._row_to_dict(row)\
+        return [self._row_to_dict(row)\
              for row in self._stat_db.fetch_all_rows(query)]
 
 
     def _table_space_usage(self, table):
-      ''' Returns the usage of a table. '''
-      query = '''SELECT tblname as name,
+        ''' Returns the usage of a table. '''
+        query = '''SELECT tblname as name,
                         count(*) AS count,
                         sum(int_pages + leaf_pages + ovfl_pages) AS size
                  FROM space_used
                  WHERE tblname = '{}'
                 '''.format(table)
 
-      return self._row_to_dict(self._stat_db.fetch_one_row(query))
-
-    def tableOrIndexPageCount(self, name):
-        query = '''SELECT name,
-                          (int_pages + leaf_pages + ovfl_pages) AS size
-                   FROM space_used
-                   WHERE name = '{}'
-                   '''.format(name)
         return self._row_to_dict(self._stat_db.fetch_one_row(query))
 
-    def _computeStats(self):
+    def _compute_stats(self):
         for table in self._tables():
             stats = self._extract_sqlite_stats(table['name'])
 
@@ -413,24 +408,23 @@ class SQLite3Analyzer:
 
 
 ### HELPERS ###
-    def _countGaps(self, table_name):
-    # Column 'gap_cnt' is set to the number of non-contiguous entries in the
-    # list of pages visited if the b-tree structure is traversed in a top-down
-    # fashion (each node visited before its child-tree is passed). Any overflow
-    # chains present are traversed from start to finish before any child-tree
-    # is.
-    #
+    def _count_gaps(self, table_name):
+# Column 'gap_cnt' is set to the number of non-contiguous entries in the
+# list of pages visited if the b-tree structure is traversed in a top-
+# down fashion (each node visited before its child-tree is passed). Any
+# overflow chains present are traversed from start to finish before any
+# child-tree is.
         pages = self._db.fetch_all_rows('''SELECT pageno, pagetype
                                          FROM temp.dbstat
                                          WHERE name="{}"
                                          ORDER BY pageno;
                                       '''.format(table_name))
-        gap_count      = 0
-        previous_page  = 0
+        gap_count = 0
+        previous_page = 0
         for page in pages:
             if previous_page > 0 and (page['pagetype'] == 'leaf') \
                and (page['pageno'] != previous_page+1):
-               gap_count += 1
+                gap_count += 1
 
             previous_page = page['pageno']
 
@@ -442,7 +436,7 @@ class SQLite3Analyzer:
                                        WHERE rootpage>0''')
 
         tables = [{'name': t['name'],
-                 'tbl_name': t['tbl_name']} for t in tables]
+                   'tbl_name': t['tbl_name']} for t in tables]
 
         sqlite_master_table = {'name':     'sqlite_master',
                                'tbl_name': 'sqlite_master'}
@@ -472,7 +466,7 @@ class SQLite3Analyzer:
 
         stats = self._row_to_dict(self._db.fetch_all_rows(query)[0])
         stats['is_without_rowid'] = self.is_without_rowid(table_name)
-        stats['gap_count'] = self._countGaps(table_name)
+        stats['gap_count'] = self._count_gaps(table_name)
 
         return stats
 
@@ -486,9 +480,9 @@ class SQLite3Analyzer:
 
     @staticmethod
     def _percentage(value, total):
-      if total == 0:
-          return 0
-      return 100 * value / total
+        if total == 0:
+            return 0
+        return 100 * value / total
 
     def _create_stat_virtual_table(self):
         self._db.execute_query('''CREATE VIRTUAL TABLE temp.stat
@@ -505,16 +499,6 @@ class SQLite3Analyzer:
                                  ORDER BY name, path''')
 
         self._drop_stat_virtual_table()
-
-    def _stat_table_dump(self):
-        self._create_stat_virtual_table()
-        rows = self._fetch_all_rows('SELECT * FROM stat')
-        res = []
-        for row in rows:
-            insert_query = 'INSERT INTO stats {};'
-            res.append(insert_query.format(self._formatValues(row)))
-        return '\n'.join(res)
-
 
     @staticmethod
     def _stat_table_create_query():

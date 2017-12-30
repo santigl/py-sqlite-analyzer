@@ -27,9 +27,7 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-import sqlite3
 import sys
-import os
 
 from include.sqlitestats import SQLite3Analyzer
 
@@ -60,12 +58,12 @@ class SQLite3ClassicReport:
         self._stat_line('Pages on the freelist (per header)',
                         self._stats.freelist_count())
         self._stat_line('Pages on the freelist (calculated)',
-                       self._stats.calculated_free_pages())
+                        self._stats.calculated_free_pages())
 
         autovacuum_pages = self._stats.autovacuum_page_count()
         self._stat_line('Pages of auto-vacuum overhead',
-                       autovacuum_pages,
-                       self._percentage(autovacuum_pages, page_count))
+                        autovacuum_pages,
+                        self._percentage(autovacuum_pages, page_count))
 
         self._stat_line('Number of tables in the database',
                         self._stats.ntable())
@@ -82,14 +80,15 @@ class SQLite3ClassicReport:
             self._stat_line('Size of uncompressed content in bytes',
                             true_file_size)
 
+            logical_file_size = self._stats.logical_file_size()
             efficiency = self._percentage(true_file_size,
-                                          self.logical_file_size())
+                                          logical_file_size)
 
             self._stat_line('Size of compressed file on disk',
                             self._stats.file_size(), efficiency)
         else:
             self._stat_line('Size of the file in bytes:',
-                             true_file_size)
+                            true_file_size)
 
 
         payload = self._stats.payload_size()
@@ -98,7 +97,7 @@ class SQLite3ClassicReport:
 
         self._stat_line('Bytes of user payload stored', payload,
                         payload_percent)
-        print('')
+        print()
 
     def tables_page_count_report(self):
         self._title_line('Page counts for all tables with their '
@@ -113,11 +112,11 @@ class SQLite3ClassicReport:
             self._stat_line(table_name.upper(), table_size,
                             self._percentage(table_size,
                                              self._stats.page_count()))
-        print('')
+        print()
 
     def tables_and_indices_page_usage_report(self):
         self._title_line('Page counts for all tables '
-                        'and indices separately')
+                         'and indices separately')
 
         page_counts = []
         # Getting the page count for tables...
@@ -141,12 +140,12 @@ class SQLite3ClassicReport:
 
             self._stat_line(name.upper(), pages, percentage)
 
-        print('')
+        print()
 
     def table_details(self, table):
         table_name = table.upper()
 
-        if len(self._stats.index_list(table)) == 0:
+        if not self._stats.index_list(table):
             self._title_line('Table {}'.format(table_name))
             self._print_stats(self._stats.table_stats(table))
             return
@@ -157,45 +156,45 @@ class SQLite3ClassicReport:
 
         self._print_stats(self._stats.table_stats(table))
 
-        print('')
+        print()
 
         self._title_line('Table {} w/o any '
                          'indices'.format(table_name))
 
         self._print_stats(self._stats.table_stats(table,
-                          exclude_indices=True))
+                                                  exclude_indices=True))
 
         for index in sorted(self._stats.index_list(table),
                             key=lambda k: k['name']):
-                index_name = index['name'].upper()
-                title = 'Index {} of table {}'.format(table_name,
-                                                      index_name)
-                self._title_line(title)
+            index_name = index['name'].upper()
+            title = 'Index {} of table {}'.format(table_name,
+                                                  index_name)
+            self._title_line(title)
 
-                index_stats = self._stats.index_stats(index['name'])
-                self._print_stats(index_stats)
-                print('')
+            index_stats = self._stats.index_stats(index['name'])
+            self._print_stats(index_stats)
+            print()
 
     def global_usage_report(self):
         self._title_line('All tables and indices')
         global_stats = self._stats.global_stats()
         self._print_stats(global_stats)
-        print('')
+        print()
 
         self._title_line('All tables')
         table_stats = self._stats.global_stats(exclude_indices=True)
         self._print_stats(table_stats)
-        print('')
+        print()
 
     def indices_usage_report(self):
-        if len(self._stats.indices()) > 0:
+        if self._stats.indices():
             self._title_line('All indices')
             self._print_stats(self._stats.indices_stats())
 
     def tables_details_report(self):
         # (We display the larger tables first.)
         tables = sorted(self._stats.tables(),
-                        key=lambda t: self._stats.table_page_count(t),
+                        key=self._stats.table_page_count,
                         reverse=True)
 
         for table in tables:
@@ -232,7 +231,7 @@ class SQLite3ClassicReport:
 
         if t['total_pages'] > 1:
             self._stat_line('Non-sequential pages', t['gap_cnt'],
-                           t['fragmentation'])
+                            t['fragmentation'])
 
         self._stat_line('Maximum payload per entry', t['mx_payload'])
         self._stat_line('Entries that use overflow', t['ovfl_cnt'],
@@ -246,7 +245,7 @@ class SQLite3ClassicReport:
         self._stat_line('Total pages used', t['total_pages'])
 
         if t['int_unused'] > 0:
-             self._stat_line('Unused bytes on index pages',
+            self._stat_line('Unused bytes on index pages',
                             t['int_unused'],
                             t['int_unused_percent'])
 
@@ -259,23 +258,25 @@ class SQLite3ClassicReport:
                         t['ovfl_unused_percent'])
 
         self._stat_line('Unused bytes on all pages',
-                       t['total_unused'], t['total_unused_percent'])
+                        t['total_unused'], t['total_unused_percent'])
 
-        print('')
+        print()
 
     def stat_db_dump(self):
         for line in self._stats.stat_db_dump():
             print(line)
 
-    def _title_line(self, title):
+    @staticmethod
+    def _title_line(title):
         print('*** {} {}\n'.format(title, '*' * (79 - len(title) - 5)))
 
-    def _stat_line(self, description, value, percentage=None):
+    @classmethod
+    def _stat_line(cls, description, value, percentage=None):
         dots = '.' * (50 - len(description))
 
         label = description + dots
 
-        value = ('{:.2f}' if type(value) is float \
+        value = ('{:.2f}' if isinstance(value, float) \
                   else '{}').format(value)
 
         if percentage is None:
@@ -284,18 +285,20 @@ class SQLite3ClassicReport:
 
         sep = ' ' * (10 - len(value))
 
-        p = '{}%'.format(self._round_percentage(percentage))\
-            if type(percentage) is not str\
+        p = '{}%'.format(cls._round_percentage(percentage))\
+            if not isinstance(percentage, str)\
             else percentage
 
         print('{} {}{} {:>10}'.format(label, value, sep, p))
 
-    def _percentage(self, value, total):
+    @staticmethod
+    def _percentage(value, total):
         if total == 0:
             return 0
         return 100 * value / total
 
-    def _round_percentage(self, percentage):
+    @staticmethod
+    def _round_percentage(percentage):
         if percentage == 100.0 or percentage < 0.001 \
            or(percentage > 1.0 and percentage < 99.0):
             p = '{:5.1f}'
@@ -475,7 +478,7 @@ Unused bytes on all pages
 
 
 def main():
-    if (len(sys.argv) < 2):
+    if len(sys.argv) < 2:
         print('Error: Missing .db file')
         print('Usage:', sys.argv[0], 'file')
         return -1
