@@ -41,13 +41,13 @@ class SQLite3Analyzer:
 
         # Creating in-memory db to store the stats:
         self._stat_db = SQLite3Manager()
-        self._stat_db.executeQuery(self._spaceused_table_create_query())
+        self._stat_db.execute_query(self._spaceused_table_create_query())
 
         # Gathering the stats for all tables:
         self._computeStats()
 
     def item_count(self):
-        return self._db.fetchSingleField('''SELECT COUNT(*)
+        return self._db.fetch_single_field('''SELECT COUNT(*)
                                             from SQLITE_MASTER''')
 
     def file_size(self):
@@ -58,12 +58,12 @@ class SQLite3Analyzer:
         return self.page_count() * self.page_size()
 
     def page_size(self):
-        return self._db.fetchSingleField('PRAGMA page_size')
+        return self._db.fetch_single_field('PRAGMA page_size')
 
     # file_pgcnt
     def page_count(self):
         # set file_pgcnt  [db one {PRAGMA page_count}]
-        return self._db.fetchSingleField('PRAGMA page_count')
+        return self._db.fetch_single_field('PRAGMA page_count')
 
     # free_pgcnt
     # set free_pgcnt    [expr {$file_pgcnt-$inuse_pgcnt-$av_pgcnt}]
@@ -81,14 +81,14 @@ class SQLite3Analyzer:
 
     #free_pgcnt2
     def freelist_count(self):
-        return self._db.fetchSingleField('PRAGMA freelist_count')
+        return self._db.fetch_single_field('PRAGMA freelist_count')
 
     def page_info(self):
         query = '''SELECT pageno, name, path
                    FROM temp.stat
                    ORDER BY pageno'''
 
-        return [row for row in self._db.fetchAllRows(query)]
+        return list(self._db.fetch_all_rows(query))
 
     # inuse_pgcnt
     # set sql {SELECT sum(leaf_pages+int_pages+ovfl_pages) FROM space_used}
@@ -96,7 +96,7 @@ class SQLite3Analyzer:
     def in_use_pages(self):
         query = '''SELECT sum(leaf_pages+int_pages+ovfl_pages)
                    FROM space_used'''
-        return self._stat_db.fetchSingleField(query)
+        return self._stat_db.fetch_single_field(query)
 
 
     # inuse_percent
@@ -113,23 +113,23 @@ class SQLite3Analyzer:
 
     def index_list(self, table):
       query = 'PRAGMA index_list = "{}"'.format(table)
-      result = self._db.fetchAllRows(query)
-      return [self._row_to_dict(row) for row in result]
+      return [self._row_to_dict(row)\
+              for row in self._stat_db.fetch_all_rows(query)]
 
     def ntable(self):
-        return self._db.fetchSingleField('''SELECT count(*)+1
+        return self._db.fetch_single_field('''SELECT count(*)+1
                                             FROM sqlite_master
                                             WHERE type="table"
                                          ''')
 
     def nindex(self):
-        return self._db.fetchSingleField('''SELECT count(*)
+        return self._db.fetch_single_field('''SELECT count(*)
                                             FROM sqlite_master
                                             WHERE type="index"
                                          ''')
 
     def nautoindex(self):
-        return self._db.fetchSingleField('''SELECT count(*)
+        return self._db.fetch_single_field('''SELECT count(*)
                                             FROM sqlite_master
                                             WHERE name
                                             LIKE "sqlite_autoindex%"
@@ -140,7 +140,7 @@ class SQLite3Analyzer:
 
 
     def payload_size(self):
-        return self._stat_db.fetchSingleField('''SELECT sum(payload)
+        return self._stat_db.fetch_single_field('''SELECT sum(payload)
                                                  FROM space_used
                                                  WHERE NOT is_index
                                                  AND name NOT
@@ -155,7 +155,7 @@ class SQLite3Analyzer:
 
     # av_pgcnt
     def autovacuum_page_count(self):
-        auto_vacuum = self._db.fetchSingleField('PRAGMA auto_vacuum')
+        auto_vacuum = self._db.fetch_single_field('PRAGMA auto_vacuum')
         if auto_vacuum == 0 or self.page_count() == 1:
             return 0
 
@@ -214,11 +214,11 @@ class SQLite3Analyzer:
 
     def is_without_rowid(self, table):
       query = 'PRAGMA index_list = "{}"'.format(table)
-      indices = self._db.fetchAllRows(query)
+      indices = self._db.fetch_all_rows(query)
 
       for index in indices:
         if index['origin'].upper() == "PK":
-          pk_is_table = self._db.fetchSingleField('''SELECT count(*)
+          pk_is_table = self._db.fetch_single_field('''SELECT count(*)
                                                      FROM sqlite_master
                                                      WHERE name="{}"
                                                      '''.format(table))
@@ -235,7 +235,7 @@ class SQLite3Analyzer:
       print('The data used to generate this report follows:')
       print('*/')
 
-      return [line for line in self._stat_db.iterdump()]
+      return list(self._stat_db.iterdump())
 
 
 
@@ -276,7 +276,7 @@ class SQLite3Analyzer:
                   WHERE {}
               '''.format(where)
 
-      stats = self._stat_db.fetchOneRow(query)
+      stats = self._stat_db.fetch_one_row(query)
       s = self._row_to_dict(stats)
 
       # Adding calculated values:
@@ -344,7 +344,7 @@ class SQLite3Analyzer:
                  FROM space_used
                  WHERE name = '{}'
                  '''.format(name)
-      return self._stat_db.fetchSingleField(query)
+      return self._stat_db.fetch_single_field(query)
 
     def _all_tables_usage(self):
       ''' Returns the usage of all tables.
@@ -356,7 +356,7 @@ class SQLite3Analyzer:
                   GROUP BY tblname
                   ORDER BY size+0 DESC, tblname'''
       return [self._row_to_dict(row)\
-              for row in self._stat_db.fetchAllRows(query)]
+             for row in self._stat_db.fetch_all_rows(query)]
 
 
     def _table_space_usage(self, table):
@@ -368,7 +368,7 @@ class SQLite3Analyzer:
                  WHERE tblname = '{}'
                 '''.format(table)
 
-      return self._row_to_dict(self._stat_db.fetchOneRow(query))
+      return self._row_to_dict(self._stat_db.fetch_one_row(query))
 
     def tableOrIndexPageCount(self, name):
         query = '''SELECT name,
@@ -376,7 +376,7 @@ class SQLite3Analyzer:
                    FROM space_used
                    WHERE name = '{}'
                    '''.format(name)
-        return self._row_to_dict(self._stat_db.fetchOneRow(query))
+        return self._row_to_dict(self._stat_db.fetch_one_row(query))
 
     def _computeStats(self):
         for table in self._tables():
@@ -408,7 +408,7 @@ class SQLite3Analyzer:
             insert_query = '''INSERT INTO space_used
                               VALUES ({})'''.format(placeholders)
 
-            self._stat_db.executeQuery(insert_query, values)
+            self._stat_db.execute_query(insert_query, values)
 
 
 
@@ -420,7 +420,7 @@ class SQLite3Analyzer:
     # chains present are traversed from start to finish before any child-tree
     # is.
     #
-        pages = self._db.fetchAllRows('''SELECT pageno, pagetype
+        pages = self._db.fetch_all_rows('''SELECT pageno, pagetype
                                          FROM temp.dbstat
                                          WHERE name="{}"
                                          ORDER BY pageno;
@@ -437,7 +437,7 @@ class SQLite3Analyzer:
         return gap_count
 
     def _tables(self):
-        tables = self._db.fetchAllRows('''SELECT name, tbl_name
+        tables = self._db.fetch_all_rows('''SELECT name, tbl_name
                                        FROM sqlite_master
                                        WHERE rootpage>0''')
 
@@ -470,36 +470,37 @@ class SQLite3Analyzer:
                 WHERE name = '{}';'''.format(table_name)
 
 
-        stats = self._row_to_dict(self._db.fetchAllRows(query)[0])
+        stats = self._row_to_dict(self._db.fetch_all_rows(query)[0])
         stats['is_without_rowid'] = self.is_without_rowid(table_name)
         stats['gap_count'] = self._countGaps(table_name)
 
         return stats
 
-
-    def _row_to_dict(self, row):
+    @staticmethod
+    def _row_to_dict(row):
         res = {}
         for column in row.keys():
             res[column] = row[column]
 
         return res
 
-    def _percentage(self, value, total):
+    @staticmethod
+    def _percentage(value, total):
       if total == 0:
           return 0
       return 100 * value / total
 
     def _create_stat_virtual_table(self):
-        self._db.executeQuery('''CREATE VIRTUAL TABLE temp.stat
+        self._db.execute_query('''CREATE VIRTUAL TABLE temp.stat
                                  USING dbstat''')
 
     def _drop_stat_virtual_table(self):
-        self._db.executeQuery('DROP TABLE temp.stat')
+        self._db.execute_query('DROP TABLE temp.stat')
 
     def _create_temp_stat_table(self):
         self._create_stat_virtual_table()
 
-        self._db.executeQuery('''CREATE TEMP TABLE dbstat
+        self._db.execute_query('''CREATE TEMP TABLE dbstat
                                  AS SELECT * FROM temp.stat
                                  ORDER BY name, path''')
 
@@ -507,7 +508,7 @@ class SQLite3Analyzer:
 
     def _stat_table_dump(self):
         self._create_stat_virtual_table()
-        rows = self._fetchAllRows('SELECT * FROM stat')
+        rows = self._fetch_all_rows('SELECT * FROM stat')
         res = []
         for row in rows:
             insert_query = 'INSERT INTO stats {};'
@@ -515,7 +516,8 @@ class SQLite3Analyzer:
         return '\n'.join(res)
 
 
-    def _stat_table_create_query(self):
+    @staticmethod
+    def _stat_table_create_query():
         return '''CREATE TABLE stats("
                   name       STRING,  /* Name of table or index */
                   path       INTEGER, /* Path to page from root */
@@ -529,7 +531,8 @@ class SQLite3Analyzer:
                   pgsize     INTEGER  /* Size of the page */
             ");'''
 
-    def _spaceused_table_create_query(self):
+    @staticmethod
+    def _spaceused_table_create_query():
         return '''CREATE TABLE space_used(
                   name clob,        -- Name of a table or index in the database file
                   tblname clob,     -- Name of associated table
