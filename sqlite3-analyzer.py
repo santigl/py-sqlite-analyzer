@@ -263,6 +263,13 @@ class SQLite3ClassicReport:
         print()
 
     def stat_db_dump(self):
+        print('The entire text of this report can be sourced into any '
+              'SQL database')
+        print('engine for further analysis. '
+              'All of the text above is an SQL comment.')
+        print('The data used to generate this report follows:')
+        print('*/')
+
         for line in self._stats.stat_db_dump():
             print(line)
 

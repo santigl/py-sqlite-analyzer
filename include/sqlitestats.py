@@ -25,11 +25,53 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+"""Module to extract metrics about the storage use of an SQLite3 database."""
+
 from math import ceil
 from os import stat
 from include.sqlitemanager import SQLite3Manager
 
+
+class StorageMetrics(dict):
+    """Storage metrics for a given database object.
+
+    It contains the following values::
+
+        ['nentry', 'payload', 'ovfl_payload',
+         'mx_payload', 'ovfl_cnt', 'leaf_pages', 'int_pages', 'ovfl_pages',
+         'leaf_unused', 'int_unused', 'ovfl_unused',
+         'gap_cnt', 'compressed_size', 'depth', 'cnt',
+         'total_pages', 'total_pages_percent', 'storage',
+         'is_compressed', 'compressed_overhead', 'payload_percent',
+         'total_unused', 'total_metadata', 'metadata_percent',
+         'average_payload', 'average_unused', 'average_metadata',
+         'ovfl_percent', 'fragmentation', 'int_unused_percent',
+         'ovfl_unused_percent', 'leaf_unused_percent', 'total_unused_percent'
+        ]
+
+    """
+
+    def __init__(self, *args, **kwargs):
+        dict.__init__(self, *args, **kwargs)
+
 class SQLite3Analyzer:
+    """Extracts space-usage statistics from an SQLite3 database.
+
+        It uses as a starting point metrics provided by the
+        ``DBSTAT`` virtual table.
+
+        Arguments:
+            db_path: path to a SQLite3 database file
+
+        Note:
+            SQLite3 must have been compiled with the
+            ``-DSQLITE_ENABLE_DBSTAT_VTAB`` flag enabled.
+
+        References:
+            https://www.sqlite.org/dbstat.html
+
+    """
+
     def __init__(self, db_path):
         self._db_file = db_path
         self._db = SQLite3Manager(self._db_file)
@@ -46,100 +88,192 @@ class SQLite3Analyzer:
         # Gathering the stats for all tables:
         self._compute_stats()
 
-    def item_count(self):
-        return self._db.fetch_single_field('''SELECT COUNT(*)
-                                            from SQLITE_MASTER''')
+    def item_count(self) -> int:
+        """Number of rows defined in table ``SQLITE_MASTER``.
 
-    def file_size(self):
+        Returns:
+            ``SELECT COUNT(*) from SQLITE_MASTER``
+        """
+        return self._db.fetch_single_field('''SELECT COUNT(*)
+                                              from SQLITE_MASTER''')
+
+    def file_size(self) -> int:
+        """Physical size of the database in bytes, as reported by
+        ``os.stat()``.
+
+        Returns:
+            Size of the database [bytes]
+        """
         return stat(self._db_file).st_size
 
-    # file_bytes
-    def logical_file_size(self):
+    def logical_file_size(self) -> int:
+        """Number of bytes that the database should take given the size
+        of a page and the number of pages it contains.
+
+        If there is no compression, then this value is equal to
+        the physical file: :func:``file_size``.
+
+        Returns:
+            Logical size of the database [bytes]
+        """
         return self.page_count() * self.page_size()
 
-    def page_size(self):
+    def page_size(self) -> int:
+        """Size in bytes of a database page.
+
+        Returns:
+            ``PRAGMA page_size`` [bytes]
+        """
         return self._db.fetch_single_field('PRAGMA page_size')
 
-    # file_pgcnt
-    def page_count(self):
-        # set file_pgcnt  [db one {PRAGMA page_count}]
+    def page_count(self) -> int:
+        """Number of reported pages in the database.
+
+        Returns:
+            ``PRAGMA page_count``
+        """
         return self._db.fetch_single_field('PRAGMA page_count')
 
-    # free_pgcnt
-    # set free_pgcnt    [expr {$file_pgcnt-$inuse_pgcnt-$av_pgcnt}]
-    def calculated_free_pages(self):
+    def calculated_free_pages(self) -> int:
+        """Number of free pages.
+
+        Returns:
+            ``page_count() - in_use_pages() - autovacuum_page_count()``
+        """
         return self.page_count()\
                - self.in_use_pages()\
                - self.autovacuum_page_count()
 
-    #file_pgcnt2
-    def calculated_page_count(self):
-        #$inuse_pgcnt+$free_pgcnt2+$av_pgcnt}
+    def calculated_page_count(self) -> int:
+        """Number of calculated pages in the database.
+
+        Returns
+            The sum of pages in use, pages in the freelist
+            and pages in the autovacuum pointer map.
+        """
         return self.in_use_pages()\
                + self.freelist_count()\
                + self.autovacuum_page_count()
 
-    #free_pgcnt2
-    def freelist_count(self):
+    def freelist_count(self) -> int:
+        """Returns the number of pages in the freelist.
+
+        Returns:
+            int: ``PRAGMA freelist_count``
+        """
         return self._db.fetch_single_field('PRAGMA freelist_count')
 
     def page_info(self):
+        """Details for each page in the database.
+
+        Returns:
+            ```[{pageno, name, path}]```
+
+            Where:
+                * ``pageno``: internal page number
+                * ``name``: name of the page
+                * ``path``: path to that page
+
+        """
         query = '''SELECT pageno, name, path
                    FROM temp.stat
                    ORDER BY pageno'''
 
         return list(self._db.fetch_all_rows(query))
 
-    # inuse_pgcnt
-    # set sql {SELECT sum(leaf_pages+int_pages+ovfl_pages) FROM space_used}
-    # set inuse_pgcnt   [expr wide([mem eval $sql])]
-    def in_use_pages(self):
+    def in_use_pages(self) -> int:
+        """Number of pages currently in use.
+
+        Returns:
+            int: ``leaf_pages`` + ``internal_pages`` + ``overflow_pages``
+
+        """
         query = '''SELECT sum(leaf_pages+int_pages+ovfl_pages)
                    FROM space_used'''
         return self._stat_db.fetch_single_field(query)
 
+    def in_use_percent(self) -> float:
+        """Percentage of pages from the total that are
+        currently in use.
 
-    # inuse_percent
-    def in_use_percent(self):
+        Returns:
+            float: % of pages of the DB that are currently in use
+
+        """
         return self._percentage(self.in_use_pages(), self.page_count())
 
     def tables(self):
+        """Names of the tables defined in the database.
+
+        Returns:
+            [str]: tables in the database
+        """
         tables = self._tables()
         return {t['name'] for t in tables if t['name'] == t['tbl_name']}
 
-    def indices(self):
+    def indices(self) -> list(dict()):
+        """Returns the indices defined in the database.
+
+        Returns:
+            A dictionary with the following::
+
+            {
+             res['name']: (str) the given name of the index,
+             res['tbl_name']: (str) the name of the table it points to
+            }
+        """
         tables = self._tables()
         return [t for t in tables if t['name'] != t['tbl_name']]
 
-    def index_list(self, table):
+    def index_list(self, table) -> list(dict()):
+        """Given a table, returns its entries in ``PRAGMA index_list``.
+
+        Returns
+            A list of dicts, where each contains the following::
+
+            {
+             'seq': (int) SQLite's internal sequence number
+                    for the index,
+             'name': (string) The name given to the index,
+             'unique': (bool):
+             'origin': (string)
+             'partial': (bool)
+            }
+
+        """
         query = 'PRAGMA index_list = "{}"'.format(table)
         return [self._row_to_dict(row)\
               for row in self._stat_db.fetch_all_rows(query)]
 
-    def ntable(self):
+    def ntable(self) -> int:
+        """Returns the number of tables in the database."""
         return self._db.fetch_single_field('''SELECT count(*)+1
-                                            FROM sqlite_master
-                                            WHERE type="table"
-                                         ''')
+                                              FROM sqlite_master
+                                              WHERE type="table"
+                                           ''')
 
-    def nindex(self):
+    def nindex(self) -> int:
+        """Returns the number of indices in the database."""
         return self._db.fetch_single_field('''SELECT count(*)
                                             FROM sqlite_master
                                             WHERE type="index"
                                          ''')
 
-    def nautoindex(self):
+    def nautoindex(self) -> int:
+        """Number of automatically-created indices in the database."""
         return self._db.fetch_single_field('''SELECT count(*)
                                             FROM sqlite_master
                                             WHERE name
                                             LIKE "sqlite_autoindex%"
                                         ''')
-
-    def nmanindex(self):
+    def nmanindex(self)-> int:
+        """Number of manually-created indices in the database."""
         return self.nindex() - self.nautoindex()
 
-
-    def payload_size(self):
+    def payload_size(self)-> int:
+        """Space in bytes used by the user's payload.
+        It does not include the space used by ``sqlite_master``.
+        """
         return self._stat_db.fetch_single_field('''SELECT sum(payload)
                                                    FROM space_used
                                                    WHERE NOT is_index
@@ -147,14 +281,17 @@ class SQLite3Analyzer:
                                                    LIKE "sqlite_master";
                                                 ''')
 
-    def is_compressed(self):
+    def is_compressed(self) -> bool:
+        """Returns whether the database file is compressed."""
         if self._is_compressed is None:
             table = self.tables().pop()
             self._iscompresed = self.table_stats(table)['is_compressed']
         return self._iscompresed
 
-    # av_pgcnt
-    def autovacuum_page_count(self):
+    def autovacuum_page_count(self) -> int:
+        """Returns the number of pages used by the *auto-vacuum*
+        pointer map.
+        """
         auto_vacuum = self._db.fetch_single_field('PRAGMA auto_vacuum')
         if auto_vacuum == 0 or self.page_count() == 1:
             return 0
@@ -174,27 +311,80 @@ class SQLite3Analyzer:
         # in the database.
         return ceil((self.page_count() - 1) / (pointers_per_page + 1))
 
-    def table_space_usage(self, table=None):
-        if table is not None:
-            return self._table_space_usage(table)
+    def table_space_usage(self) -> list(dict()):
+        """Space used by each table in the database.
+
+        Returns:
+            A sequence of dicts with the following::
+
+            {
+             'name': (str) name of the table,
+             'count' (int) number of pages it uses,
+             'size': (int) size in bytes it uses
+            }
+
+        """
+        # if table is not None:
+        #     return self._table_space_usage(table)
 
         return self._all_tables_usage()
 
-    def table_page_count(self, name, exclude_indices=False):
+    def table_page_count(self, name: str, exclude_indices=False) -> int:
+        """Number of pages that the table is currently using.
+
+        If exclude_indices == True, then it does not count those
+        pages taken by indices that might point to that table.
+
+        Args:
+            name: name of the table
+            exclude_indices: whether to avoid counting pages used
+            by indices on the table.
+        """
         if exclude_indices:
             return self.table_stats(name,
                                     exclude_indices)['total_pages']
 
         return self._query_page_count(name)
 
-    def index_page_count(self, name):
+    def index_page_count(self, name: str) -> int:
+        """Number of pages that the index is currently using.
+        Args:
+            name: name of the index
+
+        Returns:
+            number of pages
+        """
         return self._query_page_count(name)
 
-    def index_stats(self, name):
+    def index_stats(self, name: str) -> dict:
+        """Returns statistics for the index.
+
+        Args:
+            name: name of the index
+
+        Returns:
+            A dict with the following information:
+            dict...
+        """
         condition = 'name = "{}"'.format(name)
         return self._query_space_used_table(condition)
 
-    def table_stats(self, name, exclude_indices=False):
+    def table_stats(self, name: str, exclude_indices=False):
+        """Returns statistics for a table.
+
+        The value of the optional parameter ``exclude_indices``,
+        determines whether indices are considered part of the actual
+        table or not.
+
+        Args:
+            name: name of the table
+
+        Returns:
+            A dict with the following information:
+            dict...
+
+
+        """
         if exclude_indices:
             condition = 'name = "{}"'.format(name)
         else:
@@ -203,17 +393,36 @@ class SQLite3Analyzer:
         return self._query_space_used_table(condition)
 
     def global_stats(self, exclude_indices=False):
+        """Stats for all tables and/or indices in the database
+
+        The value of the optional parameter ``exclude_indices``
+        determines whether indices are considered.
+
+        """
         condition = 'NOT is_index' if exclude_indices else '1'
         return self._query_space_used_table(condition)
 
     def indices_stats(self):
-      #
-      # THROW EXCEPTION IF THERE ARE NO INDICES (!)
-      #
+        """Return metadata about the indices in the database.
+
+        Raises:
+            ValueError: If no indices exist
+
+        """
+        if not self.nindex():
+            raise ValueError('There are no indices in the DB.')
 
         return self._query_space_used_table('is_index')
 
-    def is_without_rowid(self, table):
+    def is_without_rowid(self, table: str) -> bool:
+        """Returns whether the given table is a ``WITHOUT ROWID`` table.
+
+        Args:
+            table: name of the table
+
+        References:
+            https://sqlite.org/withoutrowid.html
+        """
         query = 'PRAGMA index_list = "{}"'.format(table)
         indices = self._db.fetch_all_rows(query)
 
@@ -224,26 +433,22 @@ class SQLite3Analyzer:
                            WHERE name="{}"'''.format(table)
 
                 pk_is_table = self._db.fetch_single_field(query)
-            if not pk_is_table:
-                return True
+                if not pk_is_table:
+                    return True
 
         return False
 
-    def stat_db_dump(self):
-        print('The entire text of this report can be sourced into any '
-              'SQL database')
-        print('engine for further analysis. '
-              'All of the text above is an SQL comment.')
-        print('The data used to generate this report follows:')
-        print('*/')
+    def stat_db_dump(self) -> list:
+        """Returns a dump of the DB containing the stats.
 
+        Returns:
+            list of lines containing an SQL dump of the stat database.
+        """
         return list(self._stat_db.iterdump())
-
-
 
 #### HELPERS ####
 
-    def _query_space_used_table(self, where):
+    def _query_space_used_table(self, where: str) -> StorageMetrics:
         # total_pages: Database pages consumed.
         # total_pages_percent: Pages consumed as a percentage of the file.
         # storage: Bytes consumed.
@@ -279,7 +484,7 @@ class SQLite3Analyzer:
                 '''.format(where)
 
         stats = self._stat_db.fetch_one_row(query)
-        s = self._row_to_dict(stats)
+        s = self._extract_storage_metrics(stats)
 
         # Adding calculated values:
         s['total_pages'] = s['leaf_pages']\
@@ -342,16 +547,14 @@ class SQLite3Analyzer:
         return s
 
 
-    def _query_page_count(self, name):
+    def _query_page_count(self, name: str) -> int:
         query = '''SELECT (int_pages + leaf_pages + ovfl_pages) AS count
                  FROM space_used
                  WHERE name = '{}'
                  '''.format(name)
         return self._stat_db.fetch_single_field(query)
 
-    def _all_tables_usage(self):
-        ''' Returns the usage of all tables.
-        '''
+    def _all_tables_usage(self) -> list(dict()):
         query = '''SELECT tblname as name,
                         count(*) AS count,
                         sum(int_pages + leaf_pages + ovfl_pages) AS size
@@ -359,11 +562,10 @@ class SQLite3Analyzer:
                   GROUP BY tblname
                   ORDER BY size+0 DESC, tblname'''
         return [self._row_to_dict(row)\
-             for row in self._stat_db.fetch_all_rows(query)]
+                for row in self._stat_db.fetch_all_rows(query)]
 
 
-    def _table_space_usage(self, table):
-        ''' Returns the usage of a table. '''
+    def _table_space_usage(self, table: str):
         query = '''SELECT tblname as name,
                         count(*) AS count,
                         sum(int_pages + leaf_pages + ovfl_pages) AS size
@@ -408,7 +610,7 @@ class SQLite3Analyzer:
 
 
 ### HELPERS ###
-    def _count_gaps(self, table_name):
+    def _count_gaps(self, table_name: str):
 # Column 'gap_cnt' is set to the number of non-contiguous entries in the
 # list of pages visited if the b-tree structure is traversed in a top-
 # down fashion (each node visited before its child-tree is passed). Any
@@ -430,7 +632,7 @@ class SQLite3Analyzer:
 
         return gap_count
 
-    def _tables(self):
+    def _tables(self) -> list(dict()):
         tables = self._db.fetch_all_rows('''SELECT name, tbl_name
                                        FROM sqlite_master
                                        WHERE rootpage>0''')
@@ -443,7 +645,7 @@ class SQLite3Analyzer:
 
         return tables + [sqlite_master_table]
 
-    def _extract_sqlite_stats(self, table_name):
+    def _extract_sqlite_stats(self, table_name: str) -> StorageMetrics:
         query = '''SELECT
                 sum(ncell) AS nentry,
                 sum((pagetype == 'leaf') * ncell) AS leaf_entries,
@@ -464,14 +666,15 @@ class SQLite3Analyzer:
                 WHERE name = '{}';'''.format(table_name)
 
 
-        stats = self._row_to_dict(self._db.fetch_all_rows(query)[0])
+        stats = self._extract_storage_metrics(self._db.fetch_all_rows(query)[0])
         stats['is_without_rowid'] = self.is_without_rowid(table_name)
         stats['gap_count'] = self._count_gaps(table_name)
 
         return stats
 
     @staticmethod
-    def _row_to_dict(row):
+    def _row_to_dict(row) -> dict:
+        """Convert an sqlite.row to a regular dictionary."""
         res = {}
         for column in row.keys():
             res[column] = row[column]
@@ -479,14 +682,23 @@ class SQLite3Analyzer:
         return res
 
     @staticmethod
-    def _percentage(value, total):
+    def _extract_storage_metrics(row) -> StorageMetrics:
+        """Convert an sqlite.row to a StorageMetrics dictionary."""
+        res = StorageMetrics()
+        for column in row.keys():
+            res[column] = row[column]
+
+        return res
+
+    @staticmethod
+    def _percentage(value: float, total: float) -> float:
         if total == 0:
             return 0
         return 100 * value / total
 
     def _create_stat_virtual_table(self):
         self._db.execute_query('''CREATE VIRTUAL TABLE temp.stat
-                                 USING dbstat''')
+                                  USING dbstat''')
 
     def _drop_stat_virtual_table(self):
         self._db.execute_query('DROP TABLE temp.stat')
