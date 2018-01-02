@@ -27,10 +27,16 @@
 
 """Module to extract metrics about the storage use of an SQLite3 database."""
 
+from collections import namedtuple
 from math import ceil
 from os import stat
 from include.sqlitemanager import SQLite3Manager
 
+Page = namedtuple('Page', ('name', 'path', 'pageno', 'pagetype', 'ncell',
+                           'payload', 'unused', 'mx_payload', 'pgoffset',
+                           'pgsize'))
+
+PageUsage = namedtuple('PageUsage', ('count', 'size'))
 
 class StorageMetrics(dict):
     """Storage metrics for a given database object.
@@ -119,7 +125,7 @@ class SQLite3Analyzer:
         return self.page_count() * self.page_size()
 
     def page_size(self) -> int:
-        """Size in bytes of a database page.
+        """Size in bytes of the database pages.
 
         Returns:
             ``PRAGMA page_size`` [bytes]
@@ -138,7 +144,7 @@ class SQLite3Analyzer:
         """Number of free pages.
 
         Returns:
-            ``page_count() - in_use_pages() - autovacuum_page_count()``
+            ``page_count()`` - ``in_use_pages()`` - ``autovacuum_page_count()``
         """
         return self.page_count()\
                - self.in_use_pages()\
@@ -150,36 +156,38 @@ class SQLite3Analyzer:
         Returns
             The sum of pages in use, pages in the freelist
             and pages in the autovacuum pointer map.
+
+            ``in_use_pages()`` + ``freelist_count()`` +
+            ``autovacuum_page_count()``
         """
         return self.in_use_pages()\
                + self.freelist_count()\
                + self.autovacuum_page_count()
 
     def freelist_count(self) -> int:
-        """Returns the number of pages in the freelist.
+        """Number of pages in the freelist.
+
+        Those are unused pages in the database.
 
         Returns:
             int: ``PRAGMA freelist_count``
         """
         return self._db.fetch_single_field('PRAGMA freelist_count')
 
-    def page_info(self):
-        """Details for each page in the database.
+    def pages(self) -> list:
+        """Returns the definition for all pages in the database.
+
+        It is a dump of the DBSTAT virtual table, without any particular
+        order.
+
 
         Returns:
-            ```[{pageno, name, path}]```
-
-            Where:
-                * ``pageno``: internal page number
-                * ``name``: name of the page
-                * ``path``: path to that page
+            [namedTuple(Page)].
 
         """
-        query = '''SELECT pageno, name, path
-                   FROM temp.stat
-                   ORDER BY pageno'''
+        query = '''SELECT * FROM temp.stat'''
 
-        return list(self._db.fetch_all_rows(query))
+        return [Page._make(row) for row in self._db.fetch_all_rows(query)]
 
     def in_use_pages(self) -> int:
         """Number of pages currently in use.
@@ -243,17 +251,17 @@ class SQLite3Analyzer:
         """
         query = 'PRAGMA index_list = "{}"'.format(table)
         return [self._row_to_dict(row)\
-              for row in self._stat_db.fetch_all_rows(query)]
+                for row in self._stat_db.fetch_all_rows(query)]
 
     def ntable(self) -> int:
-        """Returns the number of tables in the database."""
+        """Number of tables in the database."""
         return self._db.fetch_single_field('''SELECT count(*)+1
                                               FROM sqlite_master
                                               WHERE type="table"
                                            ''')
 
     def nindex(self) -> int:
-        """Returns the number of indices in the database."""
+        """Number of indices in the database."""
         return self._db.fetch_single_field('''SELECT count(*)
                                               FROM sqlite_master
                                               WHERE type="index"
@@ -272,7 +280,9 @@ class SQLite3Analyzer:
 
     def payload_size(self)-> int:
         """Space in bytes used by the user's payload.
-        It does not include the space used by ``sqlite_master``.
+
+        It does not include the space used by the ``sqlite_master``
+        table nor any indices.
         """
         return self._stat_db.fetch_single_field('''SELECT sum(payload)
                                                    FROM space_used
@@ -429,7 +439,7 @@ class SQLite3Analyzer:
         indices = self._db.fetch_all_rows(query)
 
         for index in indices:
-            if index['origin'].upper() == "PK":
+            if index['origin'].upper() == 'PK':
                 query = '''SELECT count(*)
                            FROM sqlite_master
                            WHERE name="{}"'''.format(table)
@@ -552,31 +562,32 @@ class SQLite3Analyzer:
 
     def _query_page_count(self, name: str) -> int:
         query = '''SELECT (int_pages + leaf_pages + ovfl_pages) AS count
-                 FROM space_used
-                 WHERE name = '{}'
+                   FROM space_used
+                   WHERE name = "{}"
                  '''.format(name)
         return self._stat_db.fetch_single_field(query)
 
     def _all_tables_usage(self) -> list(dict()):
         query = '''SELECT tblname as name,
-                        count(*) AS count,
-                        sum(int_pages + leaf_pages + ovfl_pages) AS size
-                  FROM space_used
-                  GROUP BY tblname
-                  ORDER BY size+0 DESC, tblname'''
-        return [self._row_to_dict(row)\
-                for row in self._stat_db.fetch_all_rows(query)]
+                          count(*) AS count,
+                          sum(int_pages + leaf_pages + ovfl_pages) AS size
+                   FROM space_used
+                   GROUP BY tblname
+                   ORDER BY size+0 DESC, tblname'''
 
+        return {row['name']: PageUsage(row['count'], row['size']) \
+                for row in self._stat_db.fetch_all_rows(query)}
 
     def _table_space_usage(self, table: str):
         query = '''SELECT tblname as name,
-                        count(*) AS count,
-                        sum(int_pages + leaf_pages + ovfl_pages) AS size
-                 FROM space_used
-                 WHERE tblname = '{}'
+                          count(*) AS count,
+                          sum(int_pages + leaf_pages + ovfl_pages) AS size
+                   FROM space_used
+                   WHERE tblname = "{}"
                 '''.format(table)
 
-        return self._row_to_dict(self._stat_db.fetch_one_row(query))
+        row = self._stat_db.fetch_one_row(query)
+        return PageUsage(row['count'], row['size'])
 
     def _compute_stats(self):
         for table in self._tables():
@@ -703,17 +714,12 @@ class SQLite3Analyzer:
         self._db.execute_query('''CREATE VIRTUAL TABLE temp.stat
                                   USING dbstat''')
 
-    def _drop_stat_virtual_table(self):
-        self._db.execute_query('DROP TABLE temp.stat')
-
     def _create_temp_stat_table(self):
         self._create_stat_virtual_table()
 
         self._db.execute_query('''CREATE TEMP TABLE dbstat
                                  AS SELECT * FROM temp.stat
                                  ORDER BY name, path''')
-
-        self._drop_stat_virtual_table()
 
     @staticmethod
     def _stat_table_create_query():

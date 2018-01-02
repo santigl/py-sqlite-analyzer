@@ -104,11 +104,10 @@ class SQLite3ClassicReport:
                          'indices')
 
         # (We want to display the larger tables first)
-        page_usages = [(table['name'], table['size'])\
-                       for table in self._stats.table_space_usage()]
-        page_usages.sort(key=lambda k: k[1], reverse=True)
+        page_usages = sorted(self._stats.table_space_usage().items(),
+                             key=lambda k: k[1].size, reverse=True)
 
-        for (table_name, table_size) in page_usages:
+        for (table_name, (table_pages, table_size)) in page_usages:
             self._stat_line(table_name.upper(), table_size,
                             self._percentage(table_size,
                                              self._stats.page_count()))
