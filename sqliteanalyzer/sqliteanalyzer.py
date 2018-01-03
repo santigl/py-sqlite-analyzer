@@ -25,12 +25,14 @@
 # ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
-"""Module to extract metrics about the storage use of an SQLite3 database."""
+"""Module to extract metrics about the storage use of an
+SQLite3 database.
+"""
 
 from collections import namedtuple
 from math import ceil
 from os import stat
-from include.sqlitemanager import SQLite3Manager
+from sqliteanalyzer.sqlitemanager import SQLite3Manager
 
 Page = namedtuple('Page', ('name', 'path', 'pageno', 'pagetype', 'ncell',
                            'payload', 'unused', 'mx_payload', 'pgoffset',
@@ -144,7 +146,8 @@ class SQLite3Analyzer:
         """Number of free pages.
 
         Returns:
-            ``page_count()`` - ``in_use_pages()`` - ``autovacuum_page_count()``
+            ``page_count()`` - ``in_use_pages()``
+            - ``autovacuum_page_count()``
         """
         return self.page_count()\
                - self.in_use_pages()\
@@ -170,7 +173,7 @@ class SQLite3Analyzer:
         Those are unused pages in the database.
 
         Returns:
-            int: ``PRAGMA freelist_count``
+            ``PRAGMA freelist_count``
         """
         return self._db.fetch_single_field('PRAGMA freelist_count')
 
@@ -179,7 +182,6 @@ class SQLite3Analyzer:
 
         It is a dump of the DBSTAT virtual table, without any particular
         order.
-
 
         Returns:
             [namedTuple(Page)].
@@ -193,7 +195,7 @@ class SQLite3Analyzer:
         """Number of pages currently in use.
 
         Returns:
-            int: ``leaf_pages`` + ``internal_pages`` + ``overflow_pages``
+            ``leaf_pages`` + ``internal_pages`` + ``overflow_pages``
 
         """
         query = '''SELECT sum(leaf_pages+int_pages+ovfl_pages)
@@ -205,21 +207,21 @@ class SQLite3Analyzer:
         currently in use.
 
         Returns:
-            float: % of pages of the DB that are currently in use
+            % of pages of the DB that are currently in use
 
         """
         return self._percentage(self.in_use_pages(), self.page_count())
 
-    def tables(self):
+    def tables(self) -> [str()]:
         """Names of the tables defined in the database.
 
         Returns:
-            [str]: tables in the database
+            tables in the database
         """
         tables = self._tables()
         return {t['name'] for t in tables if t['name'] == t['tbl_name']}
 
-    def indices(self) -> list(dict()):
+    def indices(self) -> [dict]:
         """Returns the indices defined in the database.
 
         Returns:
@@ -299,7 +301,7 @@ class SQLite3Analyzer:
         return self._iscompresed
 
     def autovacuum_page_count(self) -> int:
-        """Returns the number of pages used by the *auto-vacuum*
+        """The number of pages used by the *auto-vacuum*
         pointer map.
         """
         auto_vacuum = self._db.fetch_single_field('PRAGMA auto_vacuum')

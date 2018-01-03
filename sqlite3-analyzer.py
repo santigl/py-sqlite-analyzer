@@ -29,7 +29,7 @@
 
 import sys
 
-from include.sqlitestats import SQLite3Analyzer
+from sqliteanalyzer.sqliteanalyzer import SQLite3Analyzer
 
 # This produces a report with the same format as sqlite_analyzer.
 # (https://sqlite.org/sqlanalyze.html)
@@ -130,7 +130,7 @@ class SQLite3ClassicReport:
             page_counts.append(entry)
 
         # (We want to display the larger entries,
-        # table or index, first)
+        # table or indices, first)
         page_counts.sort(key=lambda k: k[1], reverse=True)
 
         for (name, pages) in page_counts:
@@ -502,5 +502,5 @@ def main():
     a.stat_db_dump()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
