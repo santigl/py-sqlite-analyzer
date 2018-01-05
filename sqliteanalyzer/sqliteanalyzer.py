@@ -40,6 +40,8 @@ Page = namedtuple('Page', ('name', 'path', 'pageno', 'pagetype', 'ncell',
 
 PageUsage = namedtuple('PageUsage', ('count', 'size'))
 
+Index = namedtuple('Index', ('seq', 'name', 'unique',
+                             'origin', 'partial'))
 class StorageMetrics(dict):
     """Storage metrics for a given database object.
 
@@ -235,25 +237,33 @@ class SQLite3Analyzer:
         tables = self._tables()
         return [t for t in tables if t['name'] != t['tbl_name']]
 
-    def index_list(self, table) -> list(dict()):
+    def index_list(self, table) -> [Index]:
         """Given a table, returns its entries in ``PRAGMA index_list``.
 
         Returns
-            A list of dicts, where each contains the following::
+            A list of Index namedtuples. Each contains the following::
 
-            {
-             'seq': (int) SQLite's internal sequence number
+             ('seq': (int) SQLite's internal sequence number
                     for the index,
              'name': (string) The name given to the index,
              'unique': (bool):
              'origin': (string)
              'partial': (bool)
-            }
+            )
+
+        References:
+            https://sqlite.org/pragma.html#pragma_index_list
 
         """
-        query = 'PRAGMA index_list = "{}"'.format(table)
-        return [self._row_to_dict(row)\
-                for row in self._stat_db.fetch_all_rows(query)]
+        query = 'PRAGMA index_list("{}")'.format(table)
+
+        indices = []
+        for row in self._db.fetch_all_rows(query):
+            index = Index(row['seq'], row['name'], bool(row['unique']),
+                          row['origin'], bool(row['partial']))
+            indices.append(index)
+
+        return indices
 
     def ntable(self) -> int:
         """Number of tables in the database."""
@@ -323,7 +333,7 @@ class SQLite3Analyzer:
         # in the database.
         return ceil((self.page_count() - 1) / (pointers_per_page + 1))
 
-    def table_space_usage(self) -> list(dict()):
+    def table_space_usage(self) -> [dict()]:
         """Space used by each table in the database.
 
         Returns:
@@ -437,7 +447,7 @@ class SQLite3Analyzer:
             https://sqlite.org/withoutrowid.html
 
         """
-        query = 'PRAGMA index_list = "{}"'.format(table)
+        query = 'PRAGMA index_list("{}")'.format(table)
         indices = self._db.fetch_all_rows(query)
 
         for index in indices:
@@ -569,7 +579,7 @@ class SQLite3Analyzer:
                  '''.format(name)
         return self._stat_db.fetch_single_field(query)
 
-    def _all_tables_usage(self) -> list(dict()):
+    def _all_tables_usage(self) -> [dict()]:
         query = '''SELECT tblname as name,
                           count(*) AS count,
                           sum(int_pages + leaf_pages + ovfl_pages) AS size
@@ -648,10 +658,10 @@ class SQLite3Analyzer:
 
         return gap_count
 
-    def _tables(self) -> list(dict()):
+    def _tables(self) -> [dict()]:
         tables = self._db.fetch_all_rows('''SELECT name, tbl_name
-                                       FROM sqlite_master
-                                       WHERE rootpage>0''')
+                                            FROM sqlite_master
+                                            WHERE rootpage>0''')
 
         tables = [{'name': t['name'],
                    'tbl_name': t['tbl_name']} for t in tables]

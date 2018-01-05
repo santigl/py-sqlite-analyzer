@@ -144,12 +144,14 @@ class SQLite3ClassicReport:
     def table_details(self, table):
         table_name = table.upper()
 
-        if not self._stats.index_list(table):
+        index_list = self._stats.index_list(table)
+        if not index_list:
             self._title_line('Table {}'.format(table_name))
             self._print_stats(self._stats.table_stats(table))
             return
 
-        # Splitting into 3 parts:
+        # Splitting into 3 parts.
+        # 1) Tables and indices:
         self._title_line('Table {} and all its '
                          'indices'.format(table_name))
 
@@ -157,20 +159,21 @@ class SQLite3ClassicReport:
 
         print()
 
+        # 2) Just tables:
         self._title_line('Table {} w/o any '
                          'indices'.format(table_name))
 
         self._print_stats(self._stats.table_stats(table,
                                                   exclude_indices=True))
 
-        for index in sorted(self._stats.index_list(table),
-                            key=lambda k: k['name']):
-            index_name = index['name'].upper()
+        # 3) Indices:
+        for index in sorted(index_list, key=lambda k: k.name):
+            index_name = index.name.upper()
             title = 'Index {} of table {}'.format(table_name,
                                                   index_name)
             self._title_line(title)
 
-            index_stats = self._stats.index_stats(index['name'])
+            index_stats = self._stats.index_stats(index.name)
             self._print_stats(index_stats)
             print()
 
