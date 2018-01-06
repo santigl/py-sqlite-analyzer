@@ -32,32 +32,55 @@ SQLite3 database.
 from collections import namedtuple
 from math import ceil
 from os import stat
-from sqliteanalyzer.sqlitemanager import SQLite3Manager
+
+from .sqlitemanager import SQLite3Manager
 
 Page = namedtuple('Page', ('name', 'path', 'pageno', 'pagetype', 'ncell',
                            'payload', 'unused', 'mx_payload', 'pgoffset',
                            'pgsize'))
 
-PageUsage = namedtuple('PageUsage', ('count', 'size'))
+Index = namedtuple('Index', ('name', 'table'))
 
-Index = namedtuple('Index', ('seq', 'name', 'unique',
-                             'origin', 'partial'))
+IndexListEntry = namedtuple('IndexListEntry', ('seq', 'name', 'unique',
+                                               'origin', 'partial'))
 class StorageMetrics(dict):
     """Storage metrics for a given database object.
 
-    It contains the following values::
+    It contains the following keys:
 
-        ['nentry', 'payload', 'ovfl_payload',
-         'mx_payload', 'ovfl_cnt', 'leaf_pages', 'int_pages', 'ovfl_pages',
-         'leaf_unused', 'int_unused', 'ovfl_unused',
-         'gap_cnt', 'compressed_size', 'depth', 'cnt',
-         'total_pages', 'total_pages_percent', 'storage',
-         'is_compressed', 'compressed_overhead', 'payload_percent',
-         'total_unused', 'total_metadata', 'metadata_percent',
-         'average_payload', 'average_unused', 'average_metadata',
-         'ovfl_percent', 'fragmentation', 'int_unused_percent',
-         'ovfl_unused_percent', 'leaf_unused_percent', 'total_unused_percent'
-        ]
+    * ``'nentry'``
+    * ``'payload'``
+    * ``'ovfl_payload'``
+    * ``'mx_payload'``
+    * ``'ovfl_cnt'``
+    * ``'leaf_pages'``
+    * ``'int_pages'``
+    * ``'ovfl_pages'``
+    * ``'leaf_unused'``
+    * ``'int_unused'``
+    * ``'ovfl_unused'``
+    * ``'gap_cnt'``
+    * ``'compressed_size'``
+    * ``'depth'``
+    * ``'cnt'``
+    * ``'total_pages'``
+    * ``'total_pages_percent'``
+    * ``'storage'``
+    * ``'is_compressed'``
+    * ``'compressed_overhead'``
+    * ``'payload_percent'``
+    * ``'total_unused'``
+    * ``'total_metadata'``
+    * ``'metadata_percent'``
+    * ``'average_payload'``
+    * ``'average_unused'``
+    * ``'average_metadata'``
+    * ``'ovfl_percent'``
+    * ``'fragmentation'``
+    * ``'int_unused_percent'``
+    * ``'ovfl_unused_percent'``
+    * ``'leaf_unused_percent'``
+    * ``'total_unused_percent``
 
     """
 
@@ -220,8 +243,12 @@ class SQLite3Analyzer:
         Returns:
             tables in the database
         """
-        tables = self._tables()
-        return {t['name'] for t in tables if t['name'] == t['tbl_name']}
+        tables = self._db.fetch_all_rows('''SELECT name
+                                            FROM sqlite_master
+                                            WHERE rootpage>0
+                                              AND type == "table"''')
+
+        return [t['name'] for t in tables] + ['sqlite_master']
 
     def indices(self) -> [dict]:
         """Returns the indices defined in the database.
@@ -234,17 +261,22 @@ class SQLite3Analyzer:
              res['tbl_name']: (str) the name of the table it points to
             }
         """
-        tables = self._tables()
-        return [t for t in tables if t['name'] != t['tbl_name']]
+        indices = self._db.fetch_all_rows('''SELECT name, tbl_name
+                                             FROM sqlite_master
+                                             WHERE rootpage>0
+                                               AND type == "index"''')
 
-    def index_list(self, table) -> [Index]:
+        return [{'name': i['name'], 'tbl_name': i['tbl_name']} \
+                for i in indices]
+
+    def index_list(self, table) -> [IndexListEntry]:
         """Given a table, returns its entries in ``PRAGMA index_list``.
 
         Returns
-            A list of Index namedtuples. Each contains the following::
+            A list of IndexListEntry namedtuples. Each contains the following::
 
              ('seq': (int) SQLite's internal sequence number
-                    for the index,
+                     for the index,
              'name': (string) The name given to the index,
              'unique': (bool):
              'origin': (string)
@@ -259,8 +291,8 @@ class SQLite3Analyzer:
 
         indices = []
         for row in self._db.fetch_all_rows(query):
-            index = Index(row['seq'], row['name'], bool(row['unique']),
-                          row['origin'], bool(row['partial']))
+            index = IndexListEntry(row['seq'], row['name'], bool(row['unique']),
+                                   row['origin'], bool(row['partial']))
             indices.append(index)
 
         return indices
@@ -299,8 +331,8 @@ class SQLite3Analyzer:
         return self._stat_db.fetch_single_field('''SELECT sum(payload)
                                                    FROM space_used
                                                    WHERE NOT is_index
-                                                   AND name NOT
-                                                   LIKE "sqlite_master";
+                                                     AND name
+                                                       NOT LIKE "sqlite_master";
                                                 ''')
 
     def is_compressed(self) -> bool:
@@ -333,17 +365,11 @@ class SQLite3Analyzer:
         # in the database.
         return ceil((self.page_count() - 1) / (pointers_per_page + 1))
 
-    def table_space_usage(self) -> [dict()]:
+    def table_space_usage(self) -> dict():
         """Space used by each table in the database.
 
         Returns:
-            A sequence of dicts with the following::
-
-            {
-             'name': (str) name of the table,
-             'count' (int) number of pages it uses,
-             'size': (int) size in bytes it uses
-            }
+            A dictionary from table names to page counts.
 
         """
         # if table is not None:
@@ -363,10 +389,9 @@ class SQLite3Analyzer:
             by indices on the table.
         """
         if exclude_indices:
-            return self.table_stats(name,
-                                    exclude_indices)['total_pages']
+            return self._item_page_count(name)
 
-        return self._query_page_count(name)
+        return self._table_space_usage(name)
 
     def index_page_count(self, name: str) -> int:
         """Number of pages that the index is currently using.
@@ -378,7 +403,7 @@ class SQLite3Analyzer:
             number of pages
 
         """
-        return self._query_page_count(name)
+        return self._item_page_count(name)
 
     def index_stats(self, name: str) -> StorageMetrics:
         """Returns statistics for the index.
@@ -572,43 +597,43 @@ class SQLite3Analyzer:
         return s
 
 
-    def _query_page_count(self, name: str) -> int:
-        query = '''SELECT (int_pages + leaf_pages + ovfl_pages) AS count
+    def _item_page_count(self, name: str) -> int:
+        query = '''SELECT (int_pages + leaf_pages + ovfl_pages)
                    FROM space_used
                    WHERE name = "{}"
                  '''.format(name)
         return self._stat_db.fetch_single_field(query)
 
-    def _all_tables_usage(self) -> [dict()]:
-        query = '''SELECT tblname as name,
-                          count(*) AS count,
-                          sum(int_pages + leaf_pages + ovfl_pages) AS size
-                   FROM space_used
-                   GROUP BY tblname
-                   ORDER BY size+0 DESC, tblname'''
-
-        return {row['name']: PageUsage(row['count'], row['size']) \
-                for row in self._stat_db.fetch_all_rows(query)}
-
-    def _table_space_usage(self, table: str):
-        query = '''SELECT tblname as name,
-                          count(*) AS count,
-                          sum(int_pages + leaf_pages + ovfl_pages) AS size
+    def _table_space_usage(self, tbl_name: str) -> int:
+        query = '''SELECT
+                    sum(int_pages + leaf_pages + ovfl_pages) AS pages
                    FROM space_used
                    WHERE tblname = "{}"
-                '''.format(table)
+                   GROUP BY tblname
+                '''.format(tbl_name)
 
-        row = self._stat_db.fetch_one_row(query)
-        return PageUsage(row['count'], row['size'])
+        return self._stat_db.fetch_single_field(query)
+
+    def _all_tables_usage(self) -> dict():
+        query = '''SELECT tblname as name,
+                          sum(int_pages + leaf_pages + ovfl_pages) AS pages
+                   FROM space_used
+                   GROUP BY tblname'''
+
+        return {row['name']: row['pages'] \
+                for row in self._stat_db.fetch_all_rows(query)}
 
     def _compute_stats(self):
-        for table in self._tables():
-            stats = self._extract_sqlite_stats(table['name'])
+        tables = [{'name': t, 'tbl_name': t} for t in self.tables()]
+        indices = self.indices()
 
-            is_index = (table['name'] != table['tbl_name'])
+        for entry in tables + indices:
+            stats = self._extract_sqlite_stats(entry['name'])
 
-            values = (table['name'],
-                      table['tbl_name'],
+            is_index = (entry['name'] != entry['tbl_name'])
+
+            values = (entry['name'],
+                      entry['tbl_name'],
                       is_index,
                       stats['is_without_rowid'],
                       stats['nentry'],
@@ -657,19 +682,6 @@ class SQLite3Analyzer:
             previous_page = page['pageno']
 
         return gap_count
-
-    def _tables(self) -> [dict()]:
-        tables = self._db.fetch_all_rows('''SELECT name, tbl_name
-                                            FROM sqlite_master
-                                            WHERE rootpage>0''')
-
-        tables = [{'name': t['name'],
-                   'tbl_name': t['tbl_name']} for t in tables]
-
-        sqlite_master_table = {'name':     'sqlite_master',
-                               'tbl_name': 'sqlite_master'}
-
-        return tables + [sqlite_master_table]
 
     def _extract_sqlite_stats(self, table_name: str) -> dict:
         query = '''SELECT

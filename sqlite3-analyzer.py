@@ -29,7 +29,7 @@
 
 import sys
 
-from sqliteanalyzer.sqliteanalyzer import SQLite3Analyzer
+from sqliteanalyzer import SQLite3Analyzer
 
 # This produces a report with the same format as sqlite_analyzer.
 # (https://sqlite.org/sqlanalyze.html)
@@ -105,11 +105,11 @@ class SQLite3ClassicReport:
 
         # (We want to display the larger tables first)
         page_usages = sorted(self._stats.table_space_usage().items(),
-                             key=lambda k: k[1].size, reverse=True)
+                             key=lambda k: k[1], reverse=True)
 
-        for (table_name, (table_pages, table_size)) in page_usages:
-            self._stat_line(table_name.upper(), table_size,
-                            self._percentage(table_size,
+        for (table_name, table_pages) in page_usages:
+            self._stat_line(table_name.upper(), table_pages,
+                            self._percentage(table_pages,
                                              self._stats.page_count()))
         print()
 
