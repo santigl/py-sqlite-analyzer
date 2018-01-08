@@ -6,3 +6,6 @@ It is based on [sqlite3_analyzer](https://sqlite.org/sqlanalyze.html), a TCL scr
 
 ## Usage
 ```./sqlite3-analyzer.py file.db```
+
+## Sample output
+View [sample output](https://github.com/santigl/py-sqlite-analyzer/wiki/Sample-Output).
