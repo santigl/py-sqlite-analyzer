@@ -429,7 +429,7 @@ class SQLite3Analyzer:
             name: name of the table
 
         Returns:
-            a StorageMetrics object
+            a StorageMetrics dictionary
 
 
         """
@@ -441,10 +441,18 @@ class SQLite3Analyzer:
         return self._query_space_used_table(condition)
 
     def global_stats(self, exclude_indices=False) -> StorageMetrics:
-        """Stats for all tables and/or indices in the database
+        """Storage metrics for all tables and/or indices in the database
 
         The value of the optional parameter ``exclude_indices``
         determines whether indices are considered.
+
+        Args:
+            exclude_indices: bool: if False, indices are considered part
+            of a given table. If True, they are considered separate entities
+            that use their own storage space.
+
+        Returns:
+            a StorageMetrics dictionary
 
         """
         condition = 'NOT is_index' if exclude_indices else '1'
@@ -662,11 +670,11 @@ class SQLite3Analyzer:
 
 ### HELPERS ###
     def _count_gaps(self, table_name: str):
-# Column 'gap_cnt' is set to the number of non-contiguous entries in the
-# list of pages visited if the b-tree structure is traversed in a top-
-# down fashion (each node visited before its child-tree is passed). Any
-# overflow chains present are traversed from start to finish before any
-# child-tree is.
+    # Column 'gap_cnt' is set to the number of non-contiguous entries in the
+    # list of pages visited if the b-tree structure is traversed in a top-
+    # down fashion (each node visited before its child-tree is passed). Any
+    # overflow chains present are traversed from start to finish before any
+    # child-tree is.
         pages = self._db.fetch_all_rows('''SELECT pageno, pagetype
                                            FROM temp.dbstat
                                            WHERE name="{}"
