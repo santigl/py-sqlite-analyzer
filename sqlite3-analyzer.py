@@ -148,6 +148,7 @@ class SQLite3ClassicReport:
         if not index_list:
             self._title_line('Table {}'.format(table_name))
             self._print_stats(self._stats.table_stats(table))
+            print()
             return
 
         # Splitting into 3 parts.
@@ -281,44 +282,34 @@ class SQLite3ClassicReport:
 
     @classmethod
     def _stat_line(cls, description, value, percentage=None):
-        dots = '.' * (50 - len(description))
+        # Line format: 'Label.......  value    (pct.)%'
+        #               |----40----|-|-----|-|---10---|
 
-        label = description + dots
+        # First 40 characters are description and filling dots (fixed):
+        dots = '.' * (40 - len(description))
+        label = description + ' ' + dots
 
-        value = ('{:.2f}' if isinstance(value, float) \
-                  else '{}').format(value)
+        # If it's a float, we want only 2 decimal digits.
+        if isinstance(value, float):
+            value = round(value, 2)
+
+        # Right-aligning value assuming the percentage, when present,
+        # will take a 10 character field
+        value_str = ' {}'.format(value).rjust(len(label)-10-3, '.')
 
         if percentage is None:
-            print('{} {}'.format(label, value))
+            print('{}{}'.format(label, value_str))
             return
 
-        sep = ' ' * (10 - len(value))
+        percentage_str = '{:.2f}%'.format(percentage).rjust(10, ' ')
 
-        p = '{}%'.format(cls._round_percentage(percentage))\
-            if not isinstance(percentage, str)\
-            else percentage
-
-        print('{} {}{} {:>10}'.format(label, value, sep, p))
+        print('{}{}{}'.format(label, value_str, percentage_str))
 
     @staticmethod
     def _percentage(value, total):
         if total == 0:
             return 0
         return 100 * value / total
-
-    @staticmethod
-    def _round_percentage(percentage):
-        if percentage == 100.0 or percentage < 0.001 \
-           or(percentage > 1.0 and percentage < 99.0):
-            p = '{:5.1f}'
-
-        elif percentage < 0.1 or  percentage > 99.9:
-            p = '{:7.3f}'
-
-        else:
-            p = '{:6.2f}'
-
-        return p.format(percentage)
 
     def print_definitions(self):
         d = '''Page size in bytes
