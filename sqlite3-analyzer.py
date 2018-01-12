@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2017 Santiago Gil
+# Copyright 2018 Santiago Gil
 # (github.com/santigl)
 #
 # Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,7 @@
 
 import sys
 
-from sqliteanalyzer import SQLite3Analyzer
+from sqliteanalyzer import StorageAnalyzer
 
 # This produces a report with the same format as sqlite_analyzer.
 # (https://sqlite.org/sqlanalyze.html)
@@ -37,7 +37,7 @@ from sqliteanalyzer import SQLite3Analyzer
 class SQLite3ClassicReport:
     def __init__(self, db_path):
         self._database_path = db_path
-        self._stats = SQLite3Analyzer(db_path)
+        self._stats = StorageAnalyzer(db_path)
 
     def disk_space_report(self):
         print('/** Disk-Space Utilization Report For '
