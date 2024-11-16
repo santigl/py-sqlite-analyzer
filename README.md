@@ -11,7 +11,7 @@ Requires the `sqliteanalyzer` package, which can be installed with:
 pip install sqliteanalyzer
 ```
 
-or downloaded from https://pypi.python.org/pypi/sqliteanalyzer/0.1
+or downloaded from https://pypi.python.org/pypi/sqliteanalyzer
 
 ## Usage
 ```./sqlite3-analyzer.py file.db```
